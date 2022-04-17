@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -227,20 +228,29 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 
 		// dump mod list
 
-		StringBuilder modListText = new StringBuilder();
+		List<ModCandidate> builtinMods = new ArrayList<>();
+		List<ModCandidate> rootMods = new ArrayList<>();
+		Map<ModCandidate, List<ModCandidate>> nestedModMap = new LinkedHashMap<>();
 
 		for (ModCandidate mod : modCandidates) {
-			if (modListText.length() > 0) modListText.append('\n');
-
-			modListText.append("\t- ");
-			modListText.append(mod.getId());
-			modListText.append(' ');
-			modListText.append(mod.getVersion().getFriendlyString());
-
 			if (!mod.getParentMods().isEmpty()) {
-				modListText.append(" via ");
-				modListText.append(mod.getParentMods().iterator().next().getId());
+				ModCandidate parent = mod.getParentMods().iterator().next();
+				nestedModMap.computeIfAbsent(parent, p -> new ArrayList<>()).add(mod);
+			} else if (mod.isBuiltin()) {
+				builtinMods.add(mod);
+			} else {
+				rootMods.add(mod);
 			}
+		}
+
+		StringBuilder modListText = new StringBuilder();
+
+		for (ModCandidate mod : rootMods) {
+			if (mod.getId().equals(MOD_ID)) {
+				nestedModMap.computeIfAbsent(mod, p -> new ArrayList<>()).addAll(builtinMods);
+			}
+
+			appendModListText(modListText, mod, nestedModMap, 0);
 		}
 
 		int count = modCandidates.size();
@@ -288,7 +298,7 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 				try {
 					mod.setPaths(Collections.singletonList(mod.copyToDir(outputdir, false)));
 				} catch (IOException e) {
-					throw new RuntimeException("Error extracting mod "+mod, e);
+					throw new RuntimeException("Error extracting mod " + mod, e);
 				}
 			}
 
@@ -296,6 +306,32 @@ public final class FabricLoaderImpl extends net.fabricmc.loader.FabricLoader {
 		}
 
 		modCandidates = null;
+	}
+
+	private void appendModListText(StringBuilder builder, ModCandidate mod, Map<ModCandidate, List<ModCandidate>> nestedMap, int nestedDepth) {
+		if (builder.length() > 0) builder.append('\n');
+		builder.append('\t');
+
+		for (int i = 0; i < nestedDepth; i++) {
+			builder.append("  ");
+		}
+
+		builder.append("- ");
+		builder.append(mod.getId());
+
+		if (!mod.getMetadata().getName().equals(mod.getId())) {
+			builder.append(": ");
+			builder.append(mod.getMetadata().getName());
+		}
+
+		builder.append(' ');
+		builder.append(mod.getVersion().getFriendlyString());
+
+		if (nestedMap.containsKey(mod)) {
+			for (ModCandidate child : nestedMap.get(mod)) {
+				appendModListText(builder, child, nestedMap, nestedDepth + 1);
+			}
+		}
 	}
 
 	private void finishModLoading() {
